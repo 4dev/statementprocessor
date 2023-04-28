@@ -3,6 +3,7 @@ package com.payment.statementprocessor.config;
 import com.payment.statementprocessor.models.MT940_Record;
 import com.payment.statementprocessor.models.entities.MT940_Entity;
 import com.payment.statementprocessor.processor.MT940_RecordProcessor;
+import com.payment.statementprocessor.processor.ReferenceValidator;
 import jakarta.persistence.EntityManagerFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -42,8 +43,25 @@ public class BatchConfiguration {
   @Value("${statements.input.directory}")
   private String inputPath;
 
+  @Value("${statements.input.chunkSize}")
+  private Integer chunkSize;
+
   private final MT940_RecordProcessor entityMapper;
   private final EntityManagerFactory entityManagerFactory;
+  private final ReferenceValidator referenceValidator;
+
+  @Bean
+  public Job statementValidationJob(JobRepository jobRepository,
+                                    JobCompletionNotificationListener listener, Step csv_read_in, Step xml_read_in, Step checkReferencesTasklet) {
+    return new JobBuilder("statementValidationJob", jobRepository)
+            .incrementer(new RunIdIncrementer())
+            .listener(listener)
+            .start(csv_read_in).on("COMPLETED")
+            .to(xml_read_in).on("COMPLETED")
+            .to(checkReferencesTasklet).on("COMPLETED")
+            .end().build()
+            .build();
+  }
 
   @Bean
   @SneakyThrows
@@ -108,22 +126,10 @@ public class BatchConfiguration {
   }
 
   @Bean
-  public Job statementValidationJob(JobRepository jobRepository,
-                           JobCompletionNotificationListener listener, Step csv_read_in, Step xml_read_in) {
-    return new JobBuilder("statementValidationJob", jobRepository)
-            .incrementer(new RunIdIncrementer())
-            .listener(listener)
-            .start(csv_read_in).on("COMPLETED")
-            .to(xml_read_in).on("COMPLETED")
-            .end().build()
-            .build();
-  }
-
-  @Bean
   public Step csv_read_in(JobRepository jobRepository,
                     PlatformTransactionManager transactionManager) {
     return new StepBuilder("csv_read_in", jobRepository)
-            .<MT940_Record, MT940_Entity> chunk(10, transactionManager)
+            .<MT940_Record, MT940_Entity> chunk(chunkSize, transactionManager)
             .reader(csvCollector())
             .processor(entityMapper)
             .writer(writer())
@@ -134,7 +140,7 @@ public class BatchConfiguration {
   public Step xml_read_in(JobRepository jobRepository,
                     PlatformTransactionManager transactionManager) {
     return new StepBuilder("xml_read_in", jobRepository)
-            .<MT940_Record, MT940_Entity> chunk(10, transactionManager)
+            .<MT940_Record, MT940_Entity> chunk(chunkSize, transactionManager)
             .reader(xmlCollector())
             .processor(entityMapper)
             .writer(writer())
@@ -142,13 +148,22 @@ public class BatchConfiguration {
   }
 
   @Bean
-  public Step step3(JobRepository jobRepository,
-                    PlatformTransactionManager transactionManager) {
-    return new StepBuilder("step3", jobRepository)
-            .<MT940_Record, MT940_Entity> chunk(10, transactionManager)
+  public Step validateMutations(JobRepository jobRepository,
+                                PlatformTransactionManager transactionManager) {
+    return new StepBuilder("validateMutations", jobRepository)
+            .<MT940_Record, MT940_Entity> chunk(chunkSize, transactionManager)
             .reader(xmlReader())
             .processor(entityMapper)
             .writer(writer())
             .build();
   }
+
+  @Bean
+  public Step checkReferencesTasklet(JobRepository jobRepository,
+                                     PlatformTransactionManager transactionManager) {
+    return new StepBuilder("checkReferencesTasklet", jobRepository)
+            .tasklet(referenceValidator, transactionManager)
+            .build();
+  }
+
 }

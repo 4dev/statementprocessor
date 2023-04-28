@@ -81,14 +81,17 @@ CREATE TABLE BATCH_JOB_SEQ (
      ID BIGINT IDENTITY
 );
 
-DROP TABLE people IF EXISTS;
+DROP TABLE PROCESSED_STATEMENTS IF EXISTS;
 
-CREATE TABLE people  (
+CREATE TABLE PROCESSED_STATEMENTS  (
      id BIGINT IDENTITY NOT NULL PRIMARY KEY,
      reference VARCHAR(20),
      description VARCHAR(100),
      accountNumber VARCHAR(100),
      startBalance VARCHAR(20),
      mutation VARCHAR(20),
-     endBalance VARCHAR(20)
+     endBalance VARCHAR(20),
+     validMutation BOOLEAN,
+     hasDuplicateReference BOOLEAN,
+     duplicateReferenceCount INTEGER
 );
